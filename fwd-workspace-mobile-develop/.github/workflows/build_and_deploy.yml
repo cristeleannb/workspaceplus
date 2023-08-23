@@ -1,0 +1,95 @@
+name: CD
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy Android & iOS Apps
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up ruby env
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 2.7.2
+          bundler-cache: true
+
+      - name: Install Fastlane
+        run: gem install fastlane
+
+      - name: Use Node.js
+        uses: actions/setup-node@v1
+        with:
+          node-version: "12.x"
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+
+      - name: Cache Node.js modules
+        id: yarn-cache
+        uses: actions/cache@v1
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Decrypt Android keys
+        run: sh ./.github/scripts/decrypt_android_keys.sh
+        env:
+          RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+          RELEASE_KEYSTORE_PASSPHRASE: ${{ secrets.RELEASE_KEYSTORE_PASSPHRASE }}
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --silent
+        env:
+          CI: true
+
+      - name: Create env file
+        run: |
+          cd fastlane
+          touch .env.staging
+          echo REACT_APP_BASE_API_URL=${{ secrets.REACT_APP_BASE_API_URL }} >> .env.staging
+          echo REACT_SERVICE_SCRIPT=${{ secrets.REACT_SERVICE_SCRIPT }} >> .env.staging
+          echo GIT_AUTHORIZATION=${{ secrets.GIT_AUTHORIZATION }} >> .env.staging
+          echo MATCH_PASSWORD=${{ secrets.MATCH_PASSWORD }} >> .env.staging
+          echo ANDROID_KEY_STORE_PASS=${{ secrets.ANDROID_KEY_STORE_PASS }} >> .env.staging
+          echo ANDROID_KEY_STORE_KEY_ALIAS=${{ secrets.ANDROID_KEY_STORE_KEY_ALIAS }} >> .env.staging
+          echo ANDROID_KEY_STORE_KEY_PASS=${{ secrets.ANDROID_KEY_STORE_KEY_PASS }} >> .env.staging
+          echo FIREBASE_CLI_TOKEN=${{ secrets.FIREBASE_CLI_TOKEN }} >> .env.staging
+          echo FIREBASE_ANDROID_APP_ID=${{ secrets.FIREBASE_ANDROID_APP_ID }} >> .env.staging
+          echo FIREBASE_ANDROID_TESTER_GROUP=${{ secrets.FIREBASE_ANDROID_TESTER_GROUP }} >> .env.staging
+          echo FIREBASE_ANDROID_LINK=${{ secrets.FIREBASE_ANDROID_LINK }} >> .env.staging
+          echo FIREBASE_IOS_APP_ID=${{ secrets.FIREBASE_IOS_APP_ID }} >> .env.staging
+          echo FIREBASE_IOS_TESTER_GROUP=${{ secrets.FIREBASE_IOS_TESTER_GROUP }} >> .env.staging
+          echo FIREBASE_IOS_LINK=${{ secrets.FIREBASE_IOS_LINK }} >> .env.staging
+          echo APP_STORE_CONNECT_API_KEY_KEY_ID=${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }} >> .env.staging
+          echo APP_STORE_CONNECT_API_KEY_ISSUER_ID=${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }} >> .env.staging
+          echo APP_STORE_CONNECT_API_KEY_KEY=${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }} >> .env.staging
+          echo APP_STORE_CERTIFICATE_PROFILE_NAME_ADHOC=${{ secrets.APP_STORE_CERTIFICATE_PROFILE_NAME_ADHOC }} >> .env.staging
+          echo APP_STORE_CERTIFICATE_PROFILE_NAME_APPSTORE=${{ secrets.APP_STORE_CERTIFICATE_PROFILE_NAME_APPSTORE }} >> .env.staging
+          echo APP_STORE_TESTFLIGHT_LINK=${{ secrets.APP_STORE_TESTFLIGHT_LINK }} >> .env.staging
+          echo IOS_SCHEME=${{ secrets.IOS_SCHEME }} >> .env.staging
+          echo IOS_BUNDLE_ID=${{ secrets.IOS_BUNDLE_ID }} >> .env.staging
+          echo KEYCHAIN_TEMP_USER=${{ secrets.KEYCHAIN_TEMP_USER }} >> .env.staging
+          echo KEYCHAIN_TEMP_PASSWORD=${{ secrets.KEYCHAIN_TEMP_PASSWORD }} >> .env.staging
+          echo SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }} >> .env.staging
+          echo SLACK_ICON_URL=${{ secrets.SLACK_ICON_URL }} >> .env.staging
+          echo SLACK_BUILT_BY=${{ secrets.SLACK_BUILT_BY }} >> .env.staging
+          echo SLACK_ENVIRONMENT=${{ secrets.SLACK_ENVIRONMENT }} >> .env.staging
+          echo SLACK_COLOR=${{ secrets.SLACK_COLOR }} >> .env.staging
+          echo SLACK_FOOTER=${{ secrets.SLACK_FOOTER }} >> .env.staging
+          echo SLACK_FOOTER_ICON=${{ secrets.SLACK_FOOTER_ICON }} >> .env.staging
+          cat .env.staging
+
+      - name: Create temporary keychain
+        run: bundle exec fastlane ios create_temp_keychain --env staging
+
+      - name: Build Staging
+        run: yarn build:staging
+        env:
+          CI: true

@@ -1,0 +1,275 @@
+desc 'Generate API Service'
+private_lane :generate_api_service do
+  sh("yarn", ENV['REACT_SERVICE_SCRIPT'])
+end
+
+def delete_temp_keychain(name)
+  delete_keychain(
+    name: name
+  ) if File.exist? File.expand_path("~/Library/Keychains/#{name}-db")
+end
+
+def create_temp_keychain(name, password)
+  create_keychain(
+    name: name,
+    password: password,
+    unlock: false,
+    timeout: 0
+  )
+end
+
+def ensure_temp_keychain(name, password)
+  delete_temp_keychain(name)
+  create_temp_keychain(name, password)
+end
+
+
+# -------------Android Build & Deploy-------------#
+platform :android do
+  desc 'Build the production release APK.'
+  private_lane :build_production do
+    releaseFilePath = File.join(Dir.pwd, "..", "/android/app/release-keystore")
+    gradle(task: 'clean', project_dir: 'android/')
+    gradle(
+      task: "assemble",
+      build_type: "Release",
+      print_command: false,
+      project_dir: 'android/',
+      properties: {
+        "android.injected.signing.store.file" => releaseFilePath,
+        "android.injected.signing.store.password" => ENV['ANDROID_KEY_STORE_PASS'],
+        "android.injected.signing.key.alias" => ENV['ANDROID_KEY_STORE_KEY_ALIAS'],
+        "android.injected.signing.key.password" => ENV['ANDROID_KEY_STORE_KEY_PASS'],
+      }
+    )
+  end
+
+  desc 'Deploy the production release APK to Firebase App Distribution.'
+  private_lane :deploy_app_distribution do
+    firebase_app_distribution(
+      app: ENV['FIREBASE_ANDROID_APP_ID'],
+      firebase_cli_token: ENV['FIREBASE_CLI_TOKEN'],
+      groups: ENV['FIREBASE_ANDROID_TESTER_GROUP'],
+    )
+  end
+
+  desc 'Build and deploy Android.'
+  lane :deploy_firebase do
+    puts "REACT_APP_BASE_API_URL: #{ENV['REACT_APP_BASE_API_URL']}"
+    generate_api_service
+    build_production
+    deploy_app_distribution
+  end
+end
+
+# -------------iOS Build & Deploy-------------#
+platform :ios do
+  desc 'Set up certs and profiles for iOS.'
+  private_lane :certificates do |values|
+    api_key = app_store_connect_api_key(
+      is_key_content_base64: true,
+    )
+
+    # Use this if using github actions
+    match(
+      app_identifier: ["#{ENV['IOS_BUNDLE_ID']}", "#{ENV['IOS_BUNDLE_ID_NOTIFICATION']}"],
+      type: values[:type],
+      readonly: false,
+      git_basic_authorization: Base64.strict_encode64(ENV['GIT_AUTHORIZATION']),
+      force_for_new_devices: true,
+      keychain_name: ENV['KEYCHAIN_TEMP_USER'],
+      keychain_password: ENV['KEYCHAIN_TEMP_PASSWORD'],
+      api_key: api_key
+    )
+
+    # Use this if using local build
+    # match(
+    #   type: values[:type],
+    #   readonly: false,
+    #   force_for_new_devices: true,
+    # )
+  end
+
+  desc 'Build the production release iOS application.'
+  private_lane :build_ios do |values|
+    package = load_json(json_path: "./package.json")
+    cocoapods(
+      clean_install: true,
+      podfile: "./ios/"
+    )
+    gym(
+      scheme: ENV['IOS_SCHEME'],
+      workspace: './ios/' + package['name'] + '.xcworkspace',
+      export_method: values[:method],
+      # xcargs: {
+      #   :PROVISIONING_PROFILE_SPECIFIER => values[:profile_name],
+      # },
+      export_options: {
+        provisioningProfiles: {
+          "#{ENV['IOS_BUNDLE_ID']}" => values[:profile_name],
+          "#{ENV['IOS_BUNDLE_ID_NOTIFICATION']}" => values[:profile_notification_name],
+        },
+        compileBitcode: false,
+      }
+    )
+  end
+
+  desc 'Deploy the adhoc release IPA to Firebase App Distribution.'
+  private_lane :deploy_app_distribution do
+    firebase_app_distribution(
+      app: ENV['FIREBASE_IOS_APP_ID'],
+      firebase_cli_token: ENV['FIREBASE_CLI_TOKEN'],
+      groups: ENV['FIREBASE_IOS_TESTER_GROUP'],
+    )
+  end
+
+  desc 'Deploy the production release IPA to Testflight.'
+  private_lane :deploy_app_testflight do
+    api_key = app_store_connect_api_key(
+      is_key_content_base64: true
+    )
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: ENV['IOS_BUNDLE_ID'],
+      skip_waiting_for_build_processing: true,
+    )
+  end
+
+  desc 'Sign and build adhoc staging iOS.'
+  lane :deploy_firebase do
+    puts "REACT_APP_BASE_API_URL: #{ENV['REACT_APP_BASE_API_URL']}"
+    generate_api_service
+    certificates(type: 'adhoc')
+    build_ios(
+      method: 'ad-hoc',
+      profile_name: ENV['APP_STORE_CERTIFICATE_PROFILE_NAME_ADHOC'],
+      profile_notification_name: ENV['APP_STORE_CERTIFICATE_PROFILE_NAME_ADHOC_NOTIFICATION']
+    )
+    deploy_app_distribution
+  end
+
+  desc 'Sign and build appstore staging iOS.'
+  lane :deploy_testflight do
+    puts "REACT_APP_BASE_API_URL: #{ENV['REACT_APP_BASE_API_URL']}"
+    generate_api_service
+    certificates(type: 'appstore')
+    build_ios(
+      method: 'app-store',
+      profile_name: ENV['APP_STORE_CERTIFICATE_PROFILE_NAME_APPSTORE'],
+      profile_notification_name: ENV['APP_STORE_CERTIFICATE_PROFILE_NAME_APPSTORE_NOTIFICATION']
+    )
+    deploy_app_testflight
+  end
+
+  desc 'Create temp keychain'
+  lane :create_temp_keychain do
+    ensure_temp_keychain(
+      ENV['KEYCHAIN_TEMP_USER'],
+      ENV['KEYCHAIN_TEMP_PASSWORD'],
+    )
+  end
+
+  desc "Prepare the iOS Push Notification"
+  lane :prepare_ios_notification do
+    api_key = app_store_connect_api_key(
+      is_key_content_base64: true,
+    )
+    produce(
+      app_identifier: "#{ENV['IOS_BUNDLE_ID_NOTIFICATION']}",
+      app_name: "#{ENV['IOS_SCHEME']} OneSignalNotificationServiceExtension",
+      skip_itc: true
+    )
+  end
+end
+
+# -------------Versioning-------------#
+desc 'Get current version'
+private_lane :get_current_version do
+  package = load_json(json_path: "./package.json")
+  build_number = get_build_number(xcodeproj: './ios/' + package['name'] + '.xcodeproj')
+  "#{package['version']} (#{build_number})"
+end
+
+desc 'Commit New Version'
+private_lane :commit_version do
+  version = get_current_version()
+  commit_message = "Bump version to #{version}"
+  puts "#{commit_message}"
+  sh("git", "add", "--all")
+  sh("git", "commit", "-m", commit_message)
+end
+
+desc 'Android: Increment versionCode and set versionName to package.json version.'
+package = load_json(json_path: "./package.json")
+private_lane :inc_ver_and do
+  increment_version_code(
+    gradle_file_path: "./android/app/build.gradle",
+  )
+
+  increment_version_name(
+    gradle_file_path: "./android/app/build.gradle",
+    version_name: package['version']
+  )
+end
+
+desc 'iOS: Increment build number and set the version to package.json version.'
+package = load_json(json_path: "./package.json")
+private_lane :inc_ver_ios do
+  increment_build_number(
+    xcodeproj: './ios/' + package['name'] + '.xcodeproj'
+  )
+  increment_version_number(
+    xcodeproj: './ios/' + package['name'] + '.xcodeproj',
+    version_number: package['version']
+  )
+end
+
+desc 'Send a Slack message'
+private_lane :notify_slack do
+  version = get_current_version()
+  message = "FWD WS+ #{ENV['SLACK_ENVIRONMENT']} - v#{version}"
+  puts message
+  slack(
+    slack_url: ENV['SLACK_WEBHOOK_URL'],
+    icon_url: ENV['SLACK_ICON_URL'],
+    pretext: "*#{message}*",
+    default_payloads: [],
+    attachment_properties: {
+      color: ENV['SLACK_COLOR'],
+      author_name: "Download links",
+      fields: [
+        {
+          title: "App Distribution - Android",
+          value: ENV['FIREBASE_ANDROID_LINK'],
+        },
+        {
+          title: "App Distribution - iOS",
+          value: ENV['FIREBASE_IOS_LINK'],
+        },
+        {
+          title: "Testflight",
+          value: ENV['APP_STORE_TESTFLIGHT_LINK'],
+        }
+      ],
+      footer: ENV['SLACK_FOOTER'],
+      footer_icon: ENV['SLACK_FOOTER_ICON'],
+    }
+  )
+end
+
+desc 'Bump build numbers, and set the version to match the pacakage.json version.'
+lane :bump do
+  inc_ver_ios
+  inc_ver_and
+  commit_version
+end
+
+desc 'Align the version to match the package.json version.'
+lane :bump_update do
+  update_ver_ios
+end
+
+desc 'Send notification'
+lane :send_notification do
+  notify_slack
+end

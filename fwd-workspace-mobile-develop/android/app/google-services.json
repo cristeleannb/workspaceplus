@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "720285259405",
+    "project_id": "fwd-workspace-b1a57",
+    "storage_bucket": "fwd-workspace-b1a57.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:720285259405:android:9c350ffcc38a7c2ea3f4c4",
+        "android_client_info": {
+          "package_name": "com.fwd.workspace"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "720285259405-eokoqv02ohpgijo05u37k2quno1j6d42.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAbwXDI-LGj4KdoDfZJ7xb3ezgDsS3zwIM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "720285259405-eokoqv02ohpgijo05u37k2quno1j6d42.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
