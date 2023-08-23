@@ -1,0 +1,12 @@
+# git_url("git@github.com:360Pixels/certificate-bucket.git")
+git_url("https://github.com/360Pixels/certificate-bucket.git")
+
+storage_mode("git")
+
+# app_identifier(["com.fwd.workspace","com.fwd.workspace.OneSignalNotificationServiceExtension"])
+# username("junrey@360pixels.co")
+
+# For all available options run `fastlane match --help`
+# Remove the # in the beginning of the line to enable the other options
+
+# The docs are available on https://docs.fastlane.tools/actions/match

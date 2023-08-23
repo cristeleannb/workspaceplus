@@ -1,0 +1,66 @@
+name: Version Patch
+
+on:
+  # Trigger the workflow on pull request
+  pull_request:
+    branches: [ develop, release/* ]
+    types: [closed]
+
+jobs:
+  version:
+    name: Version Patch
+    if: github.event.pull_request.merged == true
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up ruby env
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 2.7.2
+          bundler-cache: true
+
+      - name: Install Fastlane
+        run: gem install fastlane
+
+      - name: Use Node.js
+        uses: actions/setup-node@v1
+        with:
+          node-version: "12.x"
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+
+      - name: Cache Node.js modules
+        id: yarn-cache
+        uses: actions/cache@v1
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Prepare git
+        run: |
+          git config --global user.email "${GITHUB_ACTOR}"
+          git config --global user.name "${GITHUB_ACTOR}@users.noreply.github.com"
+          git status
+          git checkout "$GITHUB_BASE_REF"
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --silent
+        env:
+          CI: true
+
+      - name: Patch Version and Commit
+        run: yarn bump:patch
+        env:
+          CI: true
+
+      - name: Push commits
+        run: |
+          git status
+          git push
+

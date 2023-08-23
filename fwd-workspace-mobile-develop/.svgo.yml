@@ -1,0 +1,3 @@
+plugins:
+  removeXMLNS: true
+  removeXMLProcInst: true
